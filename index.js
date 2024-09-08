@@ -1,6 +1,6 @@
 const express = require("express");
 const cors = require("cors");
-const { MongoClient, ServerApiVersion } = require("mongodb");
+const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const app = express();
 const port = process.env.PORT || 5000;
@@ -38,9 +38,37 @@ async function run() {
 
     // Contest related api
     app.get("/contests", async (req, res) => {
-      const contests = await contestsCollection.find().toArray();
+      let query = {};
 
+      if (req.query?.email) {
+        query = { "creator.email": req.query.email };
+      }
+
+      const contests = await contestsCollection.find(query).toArray();
       res.send(contests);
+    });
+
+    app.get("/contests/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const contest = await contestsCollection.findOne(query);
+
+      res.send(contest);
+    });
+
+    app.post("/contests", async (req, res) => {
+      const contest = req.body;
+      const result = await contestsCollection.insertOne(contest);
+
+      res.send(result);
+    });
+
+    app.delete("/contests/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+      const result = await contestsCollection.deleteOne(query);
+
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
