@@ -28,6 +28,9 @@ async function run() {
     const contestsCollection = client
       .db("contestPro")
       .collection("contestsCollection");
+    const participantCollection = client
+      .db("contestPro")
+      .collection("participantCollection");
 
     // User related api
     app.post("/users", async (req, res) => {
@@ -69,6 +72,22 @@ async function run() {
       const result = await contestsCollection.deleteOne(query);
 
       res.send(result);
+    });
+
+    // Participants related api
+    app.get("/participants", async (req, res) => {
+      const creator = req.query.creator;
+      const query = { creator_email: creator };
+      const participants = await participantCollection.find(query).toArray();
+      res.send(participants);
+    });
+
+    app.post("/participants", async (req, res) => {
+      const participantData = req.body;
+      const participant = await participantCollection.insertOne(
+        participantData
+      );
+      res.send(participant);
     });
 
     // Send a ping to confirm a successful connection
