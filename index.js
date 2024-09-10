@@ -24,7 +24,8 @@ async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
     await client.connect();
-    const userCollection = client.db("contestPro").collection("users");
+
+    const userCollection = client.db("contestPro").collection("userCollection");
     const contestsCollection = client
       .db("contestPro")
       .collection("contestsCollection");
@@ -35,7 +36,43 @@ async function run() {
     // User related api
     app.post("/users", async (req, res) => {
       const user = req.body;
+
+      const query = { email: user.email };
+      const existingUser = await userCollection.findOne(query);
+
+      if (existingUser) {
+        return res.send({ messege: "User already exists", insertedId: null });
+      }
+
       const result = await userCollection.insertOne(user);
+      res.send(result);
+    });
+
+    app.get("/users", async (req, res) => {
+      const result = await userCollection.find().toArray();
+      res.send(result);
+    });
+
+    app.delete("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const query = { _id: new ObjectId(id) };
+
+      const result = await userCollection.deleteOne(query);
+      res.send(result);
+    });
+
+    app.patch("/users/:id", async (req, res) => {
+      const id = req.params.id;
+      const role = req.query.role;
+      const query = { _id: new ObjectId(id) };
+
+      const updateDoc = {
+        $set: {
+          role: role,
+        },
+      };
+
+      const result = await userCollection.updateOne(query, updateDoc);
       res.send(result);
     });
 
@@ -74,12 +111,37 @@ async function run() {
       res.send(result);
     });
 
-    // Participants related api
+    // Participants / Submitted contests related API
     app.get("/participants", async (req, res) => {
-      const creator = req.query.creator;
-      const query = { creator_email: creator };
-      const participants = await participantCollection.find(query).toArray();
-      res.send(participants);
+      const { creator, contest_title } = req.query;
+
+      let query = {};
+
+      if (creator) {
+        query.creator_email = creator;
+
+        const participants = await participantCollection
+          .aggregate([
+            { $match: query },
+            {
+              $group: {
+                _id: "$contest_title",
+                contest_title: { $first: "$contest_title" },
+                contest_prize: { $first: "$contest_prize" },
+              },
+            },
+          ])
+          .toArray();
+
+        res.send(participants);
+      } else if (contest_title) {
+        query.contest_title = contest_title;
+
+        const participants = await participantCollection.find(query).toArray();
+        res.send(participants);
+      } else {
+        res.status(400).send({ error: "Please provide a valid query" });
+      }
     });
 
     app.post("/participants", async (req, res) => {
@@ -88,6 +150,39 @@ async function run() {
         participantData
       );
       res.send(participant);
+    });
+
+    app.patch("/participants/:id", async (req, res) => {
+      const id = req.params.id;
+
+      const participant = await participantCollection.findOne({
+        _id: new ObjectId(id),
+      });
+      const contestTitle = participant.contest_title;
+
+      const existingWinner = await participantCollection.findOne({
+        contest_title: contestTitle,
+        isWinner: true,
+      });
+
+      if (existingWinner) {
+        return res.status(400).send({
+          message: "A winner has already been declared for this contest",
+        });
+      }
+
+      const query = {
+        _id: new ObjectId(id),
+      };
+
+      const updateDoc = {
+        $set: {
+          isWinner: true,
+        },
+      };
+
+      const result = await participantCollection.updateOne(query, updateDoc);
+      res.send(result);
     });
 
     // Send a ping to confirm a successful connection
