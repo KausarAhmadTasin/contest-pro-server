@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
+const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -34,6 +35,26 @@ async function run() {
       .collection("participantCollection");
 
     // User related api
+    app.get("/users", async (req, res) => {
+      const email = req.query.email;
+
+      if (email) {
+        const query = { email: email };
+        const options = {
+          projection: {
+            _id: 1,
+            role: 1,
+          },
+        };
+
+        const user = await userCollection.findOne(query, options);
+        res.send(user);
+      } else {
+        const users = await userCollection.find().toArray();
+        res.send(users);
+      }
+    });
+
     app.post("/users", async (req, res) => {
       const user = req.body;
 
@@ -45,11 +66,6 @@ async function run() {
       }
 
       const result = await userCollection.insertOne(user);
-      res.send(result);
-    });
-
-    app.get("/users", async (req, res) => {
-      const result = await userCollection.find().toArray();
       res.send(result);
     });
 
@@ -78,10 +94,16 @@ async function run() {
 
     // Contest related api
     app.get("/contests", async (req, res) => {
-      let query = {};
+      let query = { isPending: false };
+
+      if (req.query.isPending) {
+        query.isPending = req.query.isPending === "true";
+      } else {
+        query.isPending = false;
+      }
 
       if (req.query?.email) {
-        query = { "creator.email": req.query.email };
+        query["creator.email"] = req.query.email;
       }
 
       const contests = await contestsCollection.find(query).toArray();
@@ -101,6 +123,21 @@ async function run() {
       const result = await contestsCollection.insertOne(contest);
 
       res.send(result);
+    });
+
+    app.patch("/contests/approve/:id", async (req, res) => {
+      const contestId = req.params.id;
+
+      const result = await contestsCollection.updateOne(
+        { _id: new ObjectId(contestId) },
+        { $set: { isPending: false } }
+      );
+
+      if (result.modifiedCount > 0) {
+        res.send({ message: "Contest approved successfully" });
+      } else {
+        res.status(400).send({ message: "Failed to approve contest" });
+      }
     });
 
     app.delete("/contests/:id", async (req, res) => {
@@ -128,6 +165,7 @@ async function run() {
                 _id: "$contest_title",
                 contest_title: { $first: "$contest_title" },
                 contest_prize: { $first: "$contest_prize" },
+                transaction_id: { $first: "$transaction_id" },
               },
             },
           ])
@@ -183,6 +221,32 @@ async function run() {
 
       const result = await participantCollection.updateOne(query, updateDoc);
       res.send(result);
+    });
+
+    app.get("/myParticipations", async (req, res) => {
+      const participant_email = req.query.email;
+      const query = {
+        participant_email: participant_email,
+      };
+
+      const result = await participantCollection.find(query).toArray();
+      res.send(result);
+    });
+
+    // Payment intent
+    app.post("/create-payment-intent", async (req, res) => {
+      const { price } = req.body;
+      const amount = parseInt(price * 100);
+
+      const paymentIntent = await stripe.paymentIntents.create({
+        amount: amount,
+        currency: "usd",
+        payment_method_types: ["card"],
+      });
+
+      res.send({
+        clientSecret: paymentIntent.client_secret,
+      });
     });
 
     // Send a ping to confirm a successful connection
