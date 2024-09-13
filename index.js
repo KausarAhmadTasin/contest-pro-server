@@ -104,6 +104,7 @@ async function run() {
 
       if (req.query?.email) {
         query["creator.email"] = req.query.email;
+        query.isPending = { $in: [false, true] };
       }
 
       const contests = await contestsCollection.find(query).toArray();
@@ -150,7 +151,7 @@ async function run() {
 
     // Participants / Submitted contests related API
     app.get("/participants", async (req, res) => {
-      const { creator, contest_title } = req.query;
+      const { creator, contest_title, participant } = req.query;
 
       let query = {};
 
@@ -173,9 +174,17 @@ async function run() {
 
         res.send(participants);
       } else if (contest_title) {
-        query.contest_title = contest_title;
+        query = { participant_email: contest_title };
+
+        console.log("Participant Query: ", query);
 
         const participants = await participantCollection.find(query).toArray();
+        console.log("Participants Found: ", participants);
+        res.send(participants);
+      } else if (participant) {
+        query.participant_email = participant;
+        const participants = await participantCollection.find(query).toArray();
+
         res.send(participants);
       } else {
         res.status(400).send({ error: "Please provide a valid query" });
