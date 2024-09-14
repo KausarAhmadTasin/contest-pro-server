@@ -1,5 +1,6 @@
 const express = require("express");
 const cors = require("cors");
+const jwt = require("jsonwebtoken");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
 require("dotenv").config();
 const stripe = require("stripe")(process.env.STRIPE_SECRET_KEY);
@@ -34,25 +35,70 @@ async function run() {
       .db("contestPro")
       .collection("participantCollection");
 
+    // JWT related api
+    app.post("/jwt", async (req, res) => {
+      const user = req.body;
+      const token = jwt.sign(user, process.env.ACCESS_TOKEN_SECRET, {
+        expiresIn: "1h",
+      });
+
+      res.send({ token });
+    });
+
+    // Middlewares
+    const verifyToken = (req, res, next) => {
+      const authHeader = req.headers.authorization;
+
+      if (!authHeader) {
+        return res.status(401).send({ message: "Forbidden access" });
+      }
+
+      const token = authHeader.split(" ")[1];
+      if (!token) {
+        console.log("Token missing from authorization header");
+        return res.status(401).send({ message: "Unauthorized access" });
+      }
+
+      jwt.verify(token, process.env.ACCESS_TOKEN_SECRET, (err, decoded) => {
+        if (err) {
+          console.log("JWT verification failed", err);
+          return res.status(401).send({ message: "Unauthorized access" });
+        }
+
+        req.decoded = decoded;
+        next();
+      });
+    };
+
     // User related api
-    app.get("/users", async (req, res) => {
-      const email = req.query.email;
+    app.get("/users", verifyToken, async (req, res) => {
+      const { profile } = req.query;
 
-      if (email) {
-        const query = { email: email };
-        const options = {
-          projection: {
-            _id: 1,
-            role: 1,
-          },
-        };
-
-        const user = await userCollection.findOne(query, options);
-        res.send(user);
+      if (profile) {
+        const query = { email: profile };
+        const user = await userCollection.findOne(query);
+        return res.send(user);
       } else {
         const users = await userCollection.find().toArray();
         res.send(users);
       }
+    });
+
+    app.get("/users/role/:email", verifyToken, async (req, res) => {
+      const email = req.params.email;
+      if (email !== req.decoded.email) {
+        return res.status(403).send({ message: "forbidden access" });
+      }
+      const query = { email: email };
+      const options = {
+        projection: {
+          _id: 1,
+          role: 1,
+        },
+      };
+
+      const user = await userCollection.findOne(query, options);
+      res.send(user);
     });
 
     app.post("/users", async (req, res) => {
@@ -79,6 +125,7 @@ async function run() {
 
     app.patch("/users/:id", async (req, res) => {
       const id = req.params.id;
+
       const role = req.query.role;
       const query = { _id: new ObjectId(id) };
 
@@ -98,13 +145,19 @@ async function run() {
 
       if (req.query.isPending) {
         query.isPending = req.query.isPending === "true";
-      } else {
-        query.isPending = false;
       }
 
-      if (req.query?.email) {
+      if (req.query.email) {
         query["creator.email"] = req.query.email;
         query.isPending = { $in: [false, true] };
+      }
+
+      if (req.query.contestType && req.query.contestType !== "Others") {
+        query.contestType = req.query.contestType;
+      } else if (req.query.contestType === "Others") {
+        query.contestType = {
+          $nin: ["Book Review", "Movie Review", "Article Writing"],
+        };
       }
 
       const contests = await contestsCollection.find(query).toArray();
@@ -151,7 +204,7 @@ async function run() {
 
     // Participants / Submitted contests related API
     app.get("/participants", async (req, res) => {
-      const { creator, contest_title, participant } = req.query;
+      const { creator, contest_title, participant, winner } = req.query;
 
       let query = {};
 
@@ -176,16 +229,17 @@ async function run() {
       } else if (contest_title) {
         query = { participant_email: contest_title };
 
-        console.log("Participant Query: ", query);
-
         const participants = await participantCollection.find(query).toArray();
-        console.log("Participants Found: ", participants);
-        res.send(participants);
+        return res.send(participants);
       } else if (participant) {
         query.participant_email = participant;
-        const participants = await participantCollection.find(query).toArray();
 
-        res.send(participants);
+        if (winner) {
+          query.isWinner = true;
+        }
+
+        const participants = await participantCollection.find(query).toArray();
+        return res.send(participants);
       } else {
         res.status(400).send({ error: "Please provide a valid query" });
       }
