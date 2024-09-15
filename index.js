@@ -70,8 +70,20 @@ async function run() {
       });
     };
 
+    const verifyAdmin = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+
+      const isAdmin = user?.role === "admin";
+      if (!isAdmin) {
+        return res.status(403).send({ message: "forbiddedn access" });
+      }
+      next();
+    };
+
     // User related api
-    app.get("/users", verifyToken, async (req, res) => {
+    app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const { profile } = req.query;
 
       if (profile) {
@@ -115,7 +127,7 @@ async function run() {
       res.send(result);
     });
 
-    app.delete("/users/:id", async (req, res) => {
+    app.delete("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
 
@@ -123,7 +135,7 @@ async function run() {
       res.send(result);
     });
 
-    app.patch("/users/:id", async (req, res) => {
+    app.patch("/users/:id", verifyToken, verifyAdmin, async (req, res) => {
       const id = req.params.id;
 
       const role = req.query.role;
@@ -243,6 +255,27 @@ async function run() {
       } else {
         res.status(400).send({ error: "Please provide a valid query" });
       }
+    });
+
+    app.get("/participants/stats", async (req, res) => {
+      let query = {};
+
+      // Fetch all participants
+      const allParticipants = await participantCollection.find(query).toArray();
+
+      // Calculate total number of participants
+      const totalParticipants = allParticipants.length;
+
+      // Calculate total number of winners
+      const winners = allParticipants.filter((p) => p.isWinner === true);
+      const totalWinners = winners.length;
+
+      return res.send({
+        totalParticipants,
+        totalWinners,
+        participants: allParticipants,
+        winners: winners,
+      });
     });
 
     app.post("/participants", async (req, res) => {
