@@ -8,7 +8,16 @@ const app = express();
 const port = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
+app.use(
+  cors({
+    origin: [
+      "http://localhost:5173",
+      "https://contest-pro-58eec.web.app",
+      "https://contest-pro-58eec.firebaseapp.com",
+    ],
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 const uri = `mongodb+srv://${process.env.DB_USER}:${process.env.DB_PASSWORD}@cluster0.dqs9o84.mongodb.net/?retryWrites=true&w=majority&appName=Cluster0`;
@@ -25,7 +34,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const userCollection = client.db("contestPro").collection("userCollection");
     const contestsCollection = client
@@ -82,6 +91,18 @@ async function run() {
       next();
     };
 
+    const verifyCreator = async (req, res, next) => {
+      const email = req.decoded.email;
+      const query = { email: email };
+      const user = await userCollection.findOne(query);
+
+      const isCreator = user?.role === "creator";
+      if (!isCreator) {
+        return res.status(403).send({ message: "forbiddedn access" });
+      }
+      next();
+    };
+
     // User related api
     app.get("/users", verifyToken, verifyAdmin, async (req, res) => {
       const { profile } = req.query;
@@ -98,6 +119,7 @@ async function run() {
 
     app.get("/users/role/:email", verifyToken, async (req, res) => {
       const email = req.params.email;
+
       if (email !== req.decoded.email) {
         return res.status(403).send({ message: "forbidden access" });
       }
@@ -106,6 +128,7 @@ async function run() {
         projection: {
           _id: 1,
           role: 1,
+          name: 1,
         },
       };
 
@@ -176,7 +199,7 @@ async function run() {
       res.send(contests);
     });
 
-    app.get("/contests/:id", async (req, res) => {
+    app.get("/contests/:id", verifyToken, async (req, res) => {
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
       const contest = await contestsCollection.findOne(query);
@@ -184,38 +207,48 @@ async function run() {
       res.send(contest);
     });
 
-    app.post("/contests", async (req, res) => {
+    app.post("/contests", verifyToken, verifyCreator, async (req, res) => {
       const contest = req.body;
       const result = await contestsCollection.insertOne(contest);
 
       res.send(result);
     });
 
-    app.patch("/contests/approve/:id", async (req, res) => {
-      const contestId = req.params.id;
+    app.patch(
+      "/contests/approve/:id",
+      verifyToken,
+      verifyAdmin,
+      async (req, res) => {
+        const contestId = req.params.id;
 
-      const result = await contestsCollection.updateOne(
-        { _id: new ObjectId(contestId) },
-        { $set: { isPending: false } }
-      );
+        const result = await contestsCollection.updateOne(
+          { _id: new ObjectId(contestId) },
+          { $set: { isPending: false } }
+        );
 
-      if (result.modifiedCount > 0) {
-        res.send({ message: "Contest approved successfully" });
-      } else {
-        res.status(400).send({ message: "Failed to approve contest" });
+        if (result.modifiedCount > 0) {
+          res.send({ message: "Contest approved successfully" });
+        } else {
+          res.status(400).send({ message: "Failed to approve contest" });
+        }
       }
-    });
+    );
 
-    app.delete("/contests/:id", async (req, res) => {
-      const id = req.params.id;
-      const query = { _id: new ObjectId(id) };
-      const result = await contestsCollection.deleteOne(query);
+    app.delete(
+      "/contests/:id",
+      verifyToken,
+      verifyCreator,
+      async (req, res) => {
+        const id = req.params.id;
+        const query = { _id: new ObjectId(id) };
+        const result = await contestsCollection.deleteOne(query);
 
-      res.send(result);
-    });
+        res.send(result);
+      }
+    );
 
     // Participants / Submitted contests related API
-    app.get("/participants", async (req, res) => {
+    app.get("/participants", verifyToken, async (req, res) => {
       const { creator, contest_title, participant, winner } = req.query;
 
       let query = {};
@@ -239,7 +272,7 @@ async function run() {
 
         res.send(participants);
       } else if (contest_title) {
-        query = { participant_email: contest_title };
+        query = { contest_title: contest_title };
 
         const participants = await participantCollection.find(query).toArray();
         return res.send(participants);
@@ -286,40 +319,45 @@ async function run() {
       res.send(participant);
     });
 
-    app.patch("/participants/:id", async (req, res) => {
-      const id = req.params.id;
+    app.patch(
+      "/participants/:id",
+      verifyToken,
+      verifyCreator,
+      async (req, res) => {
+        const id = req.params.id;
 
-      const participant = await participantCollection.findOne({
-        _id: new ObjectId(id),
-      });
-      const contestTitle = participant.contest_title;
-
-      const existingWinner = await participantCollection.findOne({
-        contest_title: contestTitle,
-        isWinner: true,
-      });
-
-      if (existingWinner) {
-        return res.status(400).send({
-          message: "A winner has already been declared for this contest",
+        const participant = await participantCollection.findOne({
+          _id: new ObjectId(id),
         });
-      }
+        const contestTitle = participant.contest_title;
 
-      const query = {
-        _id: new ObjectId(id),
-      };
-
-      const updateDoc = {
-        $set: {
+        const existingWinner = await participantCollection.findOne({
+          contest_title: contestTitle,
           isWinner: true,
-        },
-      };
+        });
 
-      const result = await participantCollection.updateOne(query, updateDoc);
-      res.send(result);
-    });
+        if (existingWinner) {
+          return res.status(400).send({
+            message: "A winner has already been declared for this contest",
+          });
+        }
 
-    app.get("/myParticipations", async (req, res) => {
+        const query = {
+          _id: new ObjectId(id),
+        };
+
+        const updateDoc = {
+          $set: {
+            isWinner: true,
+          },
+        };
+
+        const result = await participantCollection.updateOne(query, updateDoc);
+        res.send(result);
+      }
+    );
+
+    app.get("/myParticipations", verifyToken, async (req, res) => {
       const participant_email = req.query.email;
       const query = {
         participant_email: participant_email,
@@ -330,7 +368,7 @@ async function run() {
     });
 
     // Payment intent
-    app.post("/create-payment-intent", async (req, res) => {
+    app.post("/create-payment-intent", verifyToken, async (req, res) => {
       const { price } = req.body;
       const amount = parseInt(price * 100);
 
@@ -346,10 +384,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!"
-    );
+    // await client.db("admin").command({ ping: 1 });
+    // console.log(
+    //   "Pinged your deployment. You successfully connected to MongoDB!"
+    // );
   } finally {
     // Ensures that the client will close when you finish/error
     // await client.close();
