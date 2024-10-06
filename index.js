@@ -180,7 +180,7 @@ async function run() {
       const query = { _id: new ObjectId(id) };
 
       const participantQuery = {
-        contest_id: "66dc5c5dcf6b375f04d4625c",
+        contest_id: id,
         participant_email: participant_email,
       };
 
