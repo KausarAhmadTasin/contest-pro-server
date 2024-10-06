@@ -174,6 +174,35 @@ async function run() {
       res.send(result);
     });
 
+    // Rating related apis
+    app.patch("/contests/rating", async (req, res) => {
+      const { rating, id, participant_email } = req.body;
+      const query = { _id: new ObjectId(id) };
+
+      const participantQuery = {
+        contest_id: "66dc5c5dcf6b375f04d4625c",
+        participant_email: participant_email,
+      };
+
+      const contest = await participantCollection.findOne(participantQuery);
+      console.log(contest);
+
+      const update = {
+        $push: {
+          ratings: rating,
+        },
+      };
+
+      if (!contest) {
+        return res.status(400).send({
+          message: "You are not a participant.",
+        });
+      }
+
+      const result = await contestsCollection.updateOne(query, update);
+      res.send(result);
+    });
+
     // Contest related api
     app.get("/contests", async (req, res) => {
       let query = { isPending: false };
