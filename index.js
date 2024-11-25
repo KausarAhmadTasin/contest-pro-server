@@ -33,9 +33,6 @@ const client = new MongoClient(uri, {
 
 async function run() {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
-
     const userCollection = client.db("contestPro").collection("userCollection");
     const contestsCollection = client
       .db("contestPro")
@@ -411,14 +408,7 @@ async function run() {
         clientSecret: paymentIntent.client_secret,
       });
     });
-
-    // Send a ping to confirm a successful connection
-    // await client.db("admin").command({ ping: 1 });
-    // console.log(
-    //   "Pinged your deployment. You successfully connected to MongoDB!"
-    // );
   } finally {
-    // Ensures that the client will close when you finish/error
     // await client.close();
   }
 }
